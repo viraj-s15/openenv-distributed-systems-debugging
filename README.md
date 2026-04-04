@@ -229,3 +229,16 @@ PY
 openenv validate .
 docker build -t dist-debug-env:local .
 ```
+
+
+
+
+
+## Benchmarks b/w Models
+
+### 3 Tasks Benchmark
+<img width="1177" height="752" alt="Screenshot 2026-04-04 at 11 54 25 PM" src="https://github.com/user-attachments/assets/3dbfa87a-6696-4589-a908-baa3f498bda8" />
+
+### 7 Task Benchmark
+<img width="1294" height="240" alt="Screenshot 2026-04-05 at 12 30 45 AM" src="https://github.com/user-attachments/assets/1d0d3847-212e-46ba-967f-f79be3f9067c" />
+
