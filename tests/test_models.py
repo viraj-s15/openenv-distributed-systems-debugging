@@ -1,6 +1,6 @@
 from pydantic import ValidationError
 
-from models import Action, Observation, SystemMetrics
+from server.models import Action, Observation, SystemMetrics
 
 
 def test_system_metrics_rejects_success_rate_above_one() -> None:

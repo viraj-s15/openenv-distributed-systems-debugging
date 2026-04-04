@@ -5,12 +5,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-from constants import DEFAULT_CONFIGS, TASK_MAX_STEPS, TaskName
-from fault_injector import inject_fault
-from graders import grade_task
-from metrics_poller import MetricsPoller
-from models import Action, Observation, StepResult
-from process_manager import ProcessManager
+from .constants import (
+    DEFAULT_CONFIGS,
+    NO_COMMAND_PROVIDED_SENTINEL,
+    TASK_MAX_STEPS,
+    TaskName,
+ )
+from .fault_injector import inject_fault
+from .graders import grade_task
+from .metrics_poller import MetricsPoller
+from .models import Action, Observation, StepResult
+from .process_manager import ProcessManager
 
 
 class DistributedDebugEnv:
@@ -19,7 +24,7 @@ class DistributedDebugEnv:
     def __init__(
         self, project_root: Path | None = None, mesh_root: Path | None = None
     ) -> None:
-        self.project_root = (project_root or Path(__file__).resolve().parent).resolve()
+        self.project_root = (project_root or Path(__file__).resolve().parent.parent).resolve()
         self.mesh_root = (
             mesh_root or Path(os.getenv("MESH_ROOT", self.project_root / "mesh"))
         ).resolve()
@@ -38,6 +43,9 @@ class DistributedDebugEnv:
             "baseline_worker_restart_count": 0,
             "baseline_consumer_stall_count": 0,
         }
+        self._seen_diagnostic_signatures: set[str] = set()
+        self._command_counts: dict[str, int] = {}
+        self._last_grader_score: float = 0.0
 
     def start(self) -> None:
         if not self._metrics_poller.is_alive():
@@ -117,11 +125,30 @@ class DistributedDebugEnv:
         )
         return result.stdout.strip() == "1"
 
+    def _is_cascading_timeout_resolved(self) -> bool:
+        auth_config_file = self.mesh_root / "auth" / "config.json"
+        gateway_config_file = self.mesh_root / "gateway" / "config.json"
+        try:
+            auth_payload = json.loads(auth_config_file.read_text(encoding="utf-8"))
+            gateway_payload = json.loads(gateway_config_file.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+
+        auth_delay_ms = self._read_float(auth_payload.get("delay_ms"), default=0.0)
+        auth_timeout_ms = self._read_float(
+            gateway_payload.get("auth_timeout_ms"), default=0.0
+        )
+        if auth_timeout_ms <= 0:
+            return False
+        return auth_delay_ms <= auth_timeout_ms
+
+
     def _build_grader_context(self) -> dict[str, Any]:
         return {
             **self._baselines,
             "route_blocked": self._is_route_blocked(),
             "lock_exists": self._is_lock_present(),
+            "cascading_timeout_resolved": self._is_cascading_timeout_resolved(),
         }
 
     def _blocked_command(self, command: str) -> bool:
@@ -137,6 +164,13 @@ class DistributedDebugEnv:
         return any(pattern in normalized for pattern in dangerous_patterns)
 
     def _run_command(self, command: str) -> tuple[str, str | None]:
+        if command.strip() == NO_COMMAND_PROVIDED_SENTINEL:
+            self.last_exit_code = 2
+            return (
+                "No command provided by model. Expected JSON with a command field.",
+                "no_command_provided",
+            )
+
         if self._blocked_command(command):
             self.last_exit_code = 1
             return (
@@ -168,20 +202,11 @@ class DistributedDebugEnv:
             self.last_exit_code = 1
             return f"Command execution error: {exc}", str(exc)
 
-    def _compute_reward(
-        self,
-        command: str,
-        current: Observation,
-        previous: Observation,
-        grader_score: float,
-        command_error: str | None,
-    ) -> float:
-        if grader_score >= 0.95:
-            return 1.0
+    def _command_signature(self, command: str) -> str:
+        return " ".join(command.strip().lower().split())
 
-        reward = grader_score * 0.3
-
-        investigation_keywords = [
+    def _is_diagnostic_command(self, command: str) -> bool:
+        diagnostic_keywords = [
             "cat",
             "curl",
             "redis-cli",
@@ -192,34 +217,74 @@ class DistributedDebugEnv:
             "jq",
             "lrange",
             "llen",
-            "lrem",
-            "kill -hup",
             "keys",
             "ttl",
             "get",
-            "del",
-            "set",
         ]
-        if any(keyword in command.lower() for keyword in investigation_keywords):
-            reward += 0.10
+        normalized = command.lower()
+        return any(keyword in normalized for keyword in diagnostic_keywords)
 
-        if current.metrics.gateway_success_rate > previous.metrics.gateway_success_rate:
-            reward += 0.10
+    def _is_state_change_command(self, command: str) -> bool:
+        normalized = command.lower()
+        state_change_patterns = [
+            "kill -hup",
+            "redis-cli del",
+            "redis-cli lrem",
+            "redis-cli set",
+            "redis-cli flushdb",
+            "echo '{",
+            "> /mesh/",
+            "tee /mesh/",
+        ]
+        return any(pattern in normalized for pattern in state_change_patterns)
+
+
+    def _compute_reward(
+        self,
+        command: str,
+        current: Observation,
+        previous: Observation,
+        grader_score: float,
+        previous_grader_score: float,
+        command_error: str | None,
+    ) -> float:
+        if command_error == "no_command_provided":
+            return 0.0
+
+        if grader_score >= 0.95:
+            return 1.0
+
+        reward = grader_score * 0.75
+        signature = self._command_signature(command)
+        signature_count = self._command_counts.get(signature, 0) + 1
+        self._command_counts[signature] = signature_count
+
+        if self._is_diagnostic_command(command) and signature not in self._seen_diagnostic_signatures:
+            reward += 0.02
+            self._seen_diagnostic_signatures.add(signature)
+
+        if self._is_state_change_command(command):
+            reward += 0.03
+
+        if grader_score > previous_grader_score + 1e-4:
+            reward += 0.15
+        else:
+            reward -= 0.05
+
+        if current.metrics.gateway_success_rate > previous.metrics.gateway_success_rate + 1e-3:
+            reward += 0.05
 
         if current.metrics.queue_depth < previous.metrics.queue_depth:
-            reward += 0.10
-
-        if (
-            current.metrics.worker_restart_count
-            <= previous.metrics.worker_restart_count
-        ):
             reward += 0.05
 
-        if (
-            current.metrics.consumer_stall_count
-            <= previous.metrics.consumer_stall_count
-        ):
-            reward += 0.05
+        if current.metrics.worker_restart_count < previous.metrics.worker_restart_count:
+            reward += 0.03
+
+        if current.metrics.consumer_stall_count < previous.metrics.consumer_stall_count:
+            reward += 0.03
+
+        if signature_count > 1:
+            reward -= min(0.12, 0.04 * (signature_count - 1))
 
         if command.strip().lower() in {
             "echo",
@@ -229,24 +294,19 @@ class DistributedDebugEnv:
             "true",
             "false",
         }:
-            reward -= 0.05
+            reward -= 0.08
 
-        if (
-            self.step_count > 3
-            and self.last_exit_code != 0
-            and command_error != "blocked_command"
-        ):
-            reward -= 0.03
+        if self.last_exit_code != 0 and command_error not in {"blocked_command", "no_command_provided"}:
+            reward -= 0.08
 
         if command_error == "blocked_command":
-            reward -= 0.20
+            reward -= 0.25
 
         return max(0.0, min(1.0, reward))
 
     def _status_block(self, metrics: Any) -> str:
         return (
             "=== pipeline status after reset ===\n"
-            f"task: {self.current_task.value if self.current_task else 'unknown'}\n"
             "gateway:  running\n"
             "auth:     running\n"
             "worker:   running\n"
@@ -260,6 +320,9 @@ class DistributedDebugEnv:
         self.current_task = task
         self.max_steps = TASK_MAX_STEPS[task]
         self.step_count = 0
+        self._seen_diagnostic_signatures = set()
+        self._command_counts = {}
+        self._last_grader_score = 0.0
 
         self._truncate_logs()
         self._restore_defaults()
@@ -282,6 +345,9 @@ class DistributedDebugEnv:
             "baseline_worker_restart_count": metrics.worker_restart_count,
             "baseline_consumer_stall_count": metrics.consumer_stall_count,
         }
+        self._last_grader_score = grade_task(
+            task, metrics, self._build_grader_context()
+        )
 
         observation = Observation(
             command_output=self._status_block(metrics),
@@ -310,14 +376,24 @@ class DistributedDebugEnv:
         )
 
         previous = self.prev_observation or observation
+        previous_grader_score = self._last_grader_score
         grader_score = grade_task(
             self.current_task, metrics, self._build_grader_context()
         )
         reward = self._compute_reward(
-            action.command, observation, previous, grader_score, command_error
+            action.command,
+            observation,
+            previous,
+            grader_score,
+            previous_grader_score,
+            command_error,
         )
-        done = grader_score >= 0.95 or self.step_count >= self.max_steps
+        if command_error == "no_command_provided":
+            done = self.step_count >= self.max_steps
+        else:
+            done = grader_score >= 0.95 or self.step_count >= self.max_steps
 
+        self._last_grader_score = grader_score
         self.prev_observation = observation
 
         info: dict[str, Any] = {

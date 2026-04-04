@@ -1,22 +1,120 @@
 import os
 
-from constants import TaskName
-from inference import _parse_tasks, _single_line, extract_command
+from server.constants import TaskName
+from inference import (
+    _attempt_history_block,
+    _parse_tasks,
+    _single_line,
+    _task_symptom_block,
+    build_prompt,
+    extract_command,
+    extract_reasoning,
+ )
+from server.models import Observation, SystemMetrics
 
 
-def test_extract_command_removes_code_fence() -> None:
+def test_extract_command_rejects_non_json_code_fence() -> None:
     raw = "```bash\nredis-cli LLEN job_queue\n```"
+    assert extract_command(raw) is None
+
+
+def test_extract_command_returns_none_when_empty() -> None:
+    assert extract_command("   ") is None
+
+
+def test_extract_command_reads_json_payload() -> None:
+    raw = '{"command":"redis-cli LLEN job_queue"}'
     assert extract_command(raw) == "redis-cli LLEN job_queue"
 
 
-def test_extract_command_falls_back_when_empty() -> None:
-    assert extract_command("   ") == "ls /tmp"
+def test_extract_command_reads_fenced_json_payload() -> None:
+    raw = '```json\n{"command":"ps -ef"}\n```'
+    assert extract_command(raw) == "ps -ef"
 
 
+
+def test_extract_command_reads_json_embedded_in_text() -> None:
+    raw = 'Use this command: {"command":"redis-cli LLEN job_queue"} thanks.'
+    assert extract_command(raw) == "redis-cli LLEN job_queue"
+
+
+def test_extract_reasoning_when_present() -> None:
+    raw = '{"command":"redis-cli LLEN job_queue","reasoning":"check queue depth first"}'
+    assert extract_command(raw) == "redis-cli LLEN job_queue"
+    assert extract_reasoning(raw) == "check queue depth first"
+
+
+def test_extract_command_requires_command_even_with_reasoning() -> None:
+    raw = '{"reasoning":"i should inspect logs"}'
+    assert extract_command(raw) is None
+    assert extract_reasoning(raw) is None
 def test_single_line_removes_newlines() -> None:
     assert _single_line("echo a\necho b") == "echo a echo b"
 
 
+
+def test_task_symptom_block_is_non_empty() -> None:
+    block = _task_symptom_block(TaskName.ROUTE_PARTITION)
+    assert "connectivity path issue" in block
+    assert "route-partition" not in block
+
+
+def test_attempt_history_block_renders_all_attempts() -> None:
+    attempts = [
+        {
+            "step": 1,
+            "command": "redis-cli LLEN job_queue",
+            "reasoning": "check backlog",
+            "reward": 0.12,
+            "error": None,
+        },
+        {
+            "step": 2,
+            "command": "curl -s localhost:3000/health",
+            "reasoning": None,
+            "reward": 0.08,
+            "error": "timeout",
+        },
+    ]
+    block = _attempt_history_block(attempts)
+    assert "step 1: command=redis-cli LLEN job_queue" in block
+    assert "step 2: command=curl -s localhost:3000/health" in block
+    assert "reasoning=check backlog" in block
+    assert "error=timeout" in block
+    assert "reward=" not in block
+
+
+def test_build_prompt_contains_symptoms_and_history() -> None:
+    obs = Observation(
+        command_output="service checks show partial failures",
+        metrics=SystemMetrics(
+            gateway_success_rate=0.32,
+            gateway_p99_latency_ms=1500.0,
+            queue_depth=412,
+            worker_restart_count=3,
+            consumer_stall_count=2,
+        ),
+        process_status={"gateway": "running", "worker": "running"},
+    )
+    prompt = build_prompt(
+        obs=obs,
+        step_num=3,
+        task_name=TaskName.BACKPRESSURE_CASCADE,
+        attempt_history=[
+            {
+                "step": 1,
+                "command": "redis-cli LLEN job_queue",
+                "reasoning": "measure backlog",
+                "reward": 0.10,
+                "error": None,
+            }
+        ],
+    )
+    assert "TASK SYMPTOMS:" in prompt
+    assert "PREVIOUS ATTEMPTS:" in prompt
+    assert "step 1: command=redis-cli LLEN job_queue" in prompt
+    assert "LATEST COMMAND OUTPUT:" in prompt
+    assert "reward=" not in prompt
 def test_parse_tasks_default_and_override() -> None:
     previous = os.getenv("TASKS_CSV")
     try:

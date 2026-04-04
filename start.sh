@@ -47,4 +47,4 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 
-exec uvicorn app:app --host 0.0.0.0 --port 8000
+exec uvicorn server.api:app --host 0.0.0.0 --port 8000

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 
-from models import SystemMetrics
+from .models import SystemMetrics
 
 
 class MetricsPoller(threading.Thread):

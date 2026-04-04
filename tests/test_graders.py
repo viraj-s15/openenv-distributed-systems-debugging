@@ -1,11 +1,11 @@
-from graders import (
+from server.graders import (
     grade_backpressure_cascade,
     grade_byzantine_queue_fault,
     grade_cascading_timeout,
     grade_distributed_lock_starvation,
     grade_route_partition,
 )
-from models import SystemMetrics
+from server.models import SystemMetrics
 
 
 def _metrics(
@@ -26,9 +26,15 @@ def _metrics(
 
 
 def test_grade_cascading_timeout_boundaries() -> None:
-    assert grade_cascading_timeout(_metrics(success_rate=1.0), {}) == 1.0
-    assert grade_cascading_timeout(_metrics(success_rate=0.5), {}) == 0.3
-
+    assert grade_cascading_timeout(
+        _metrics(success_rate=1.0), {"cascading_timeout_resolved": True}
+    ) == 1.0
+    assert grade_cascading_timeout(
+        _metrics(success_rate=1.0), {"cascading_timeout_resolved": False}
+    ) == 0.25
+    assert grade_cascading_timeout(
+        _metrics(success_rate=0.5), {"cascading_timeout_resolved": False}
+    ) == 0.125
 
 def test_grade_byzantine_queue_fault_cases() -> None:
     ctx = {"baseline_worker_restart_count": 3}

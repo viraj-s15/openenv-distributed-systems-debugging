@@ -1,17 +1,21 @@
 from typing import Any
 
-from constants import TaskName
-from models import SystemMetrics
+from .constants import TaskName
+from .models import SystemMetrics
 
 
 def _clamp(score: float) -> float:
     return max(0.0, min(1.0, score))
 
 
-def grade_cascading_timeout(metrics: SystemMetrics, _: dict[str, Any]) -> float:
-    if metrics.gateway_success_rate >= 0.99:
+def grade_cascading_timeout(metrics: SystemMetrics, context: dict[str, Any]) -> float:
+    timeout_resolved = bool(context.get("cascading_timeout_resolved", False))
+    if timeout_resolved and metrics.gateway_success_rate >= 0.99:
         return 1.0
-    return _clamp(metrics.gateway_success_rate * 0.6)
+    if not timeout_resolved:
+        # Prevent instant pass while the injected timeout fault is still active.
+        return _clamp(metrics.gateway_success_rate * 0.25)
+    return _clamp(0.4 + metrics.gateway_success_rate * 0.4)
 
 
 def grade_byzantine_queue_fault(metrics: SystemMetrics, context: dict[str, Any]) -> float:

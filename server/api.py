@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-from constants import TaskName
-from env import DistributedDebugEnv
-from models import Action, Observation, StepResult
+from .constants import TaskName
+from .env import DistributedDebugEnv
+from .models import Action, Observation, StepResult
 
 
 @asynccontextmanager

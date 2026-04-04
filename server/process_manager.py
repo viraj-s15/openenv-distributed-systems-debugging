@@ -13,7 +13,7 @@ class ProcessManager:
     def __init__(
         self, project_root: Path | None = None, mesh_root: Path | None = None
     ) -> None:
-        self.project_root = (project_root or Path(__file__).resolve().parent).resolve()
+        self.project_root = (project_root or Path(__file__).resolve().parent.parent).resolve()
         self.mesh_root = (
             mesh_root or Path(os.getenv("MESH_ROOT", self.project_root / "mesh"))
         ).resolve()

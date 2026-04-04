@@ -2,8 +2,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from constants import TaskName
-from process_manager import ProcessManager
+from .constants import TaskName
+from .process_manager import ProcessManager
 
 
 def _write_json(path: Path, payload: dict) -> None:
