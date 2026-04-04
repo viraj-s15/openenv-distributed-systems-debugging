@@ -1,0 +1,76 @@
+name: distributed-systems-debug-env
+version: "1.0.0"
+description: >
+  An RL environment for debugging a distributed job processing pipeline with
+  five deterministic fault scenarios: cascading timeout, byzantine queue fault,
+  distributed lock starvation, backpressure cascade, and route partition.
+author: Team Rocket
+tags:
+  - openenv
+  - distributed-systems
+  - debugging
+  - reinforcement-learning
+
+reward_range: [0.0, 1.0]
+
+tasks:
+  - name: cascading-timeout
+    description: Synchronous upstream delay exceeds gateway timeout.
+    difficulty: easy
+    max_steps: 12
+
+  - name: byzantine-queue-fault
+    description: Poison pill message causes worker parse crash-loop.
+    difficulty: medium
+    max_steps: 12
+
+  - name: distributed-lock-starvation
+    description: Stale distributed lock prevents queue consumption.
+    difficulty: hard
+    max_steps: 14
+
+  - name: backpressure-cascade
+    description: Consumer throughput lower than producer enqueue rate.
+    difficulty: hard
+    max_steps: 14
+
+  - name: route-partition
+    description: Route policy blocks gateway to redis communication.
+    difficulty: hard
+    max_steps: 14
+
+observation_space:
+  type: object
+  properties:
+    command_output:
+      type: string
+    metrics:
+      type: object
+      properties:
+        gateway_success_rate:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        gateway_p99_latency_ms:
+          type: number
+          minimum: 0.0
+        queue_depth:
+          type: integer
+          minimum: 0
+        worker_restart_count:
+          type: integer
+          minimum: 0
+        consumer_stall_count:
+          type: integer
+          minimum: 0
+    process_status:
+      type: object
+      additionalProperties:
+        type: string
+
+action_space:
+  type: object
+  properties:
+    command:
+      type: string
+      description: Single bash command executed in the debug sandbox.

@@ -1,0 +1,4 @@
+{
+  "db_pool_size": 10,
+  "db_write_delay_ms": 0
+}

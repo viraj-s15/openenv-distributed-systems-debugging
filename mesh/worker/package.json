@@ -1,0 +1,14 @@
+{
+  "name": "worker",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "bun run index.ts",
+    "job-generator": "bun run job_generator.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

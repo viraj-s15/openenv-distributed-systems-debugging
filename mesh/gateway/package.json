@@ -1,0 +1,13 @@
+{
+  "name": "gateway",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
