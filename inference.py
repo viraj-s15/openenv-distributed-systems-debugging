@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 from server.constants import (
@@ -19,6 +19,21 @@ ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
 BENCHMARK = "distributed-systems-debug-env"
 MAX_STEPS_CAP = int(os.getenv("MAX_STEPS", "0"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
+MAX_COMPLETION_TOKENS = int(os.getenv("MAX_COMPLETION_TOKENS", "2048"))
+_JSON_DECODER = json.JSONDecoder()
+
+
+def _chat_token_limit_kwargs() -> dict[str, int]:
+    """OpenAI `gpt-5.*` / some models require `max_completion_tokens`, not `max_tokens`."""
+    override = os.getenv("CHAT_TOKEN_LIMIT_PARAM", "").strip().lower()
+    if override == "max_tokens":
+        return {"max_tokens": MAX_COMPLETION_TOKENS}
+    if override == "max_completion_tokens":
+        return {"max_completion_tokens": MAX_COMPLETION_TOKENS}
+    base = API_BASE_URL or ""
+    if "api.openai.com" in base:
+        return {"max_completion_tokens": MAX_COMPLETION_TOKENS}
+    return {"max_tokens": MAX_COMPLETION_TOKENS}
 
 SYSTEM_PROMPT = """You have bash access to a distributed job processing pipeline that is experiencing a failure.
 Use bash commands to investigate system behavior and narrow down likely fault conditions.
@@ -45,6 +60,15 @@ TASK_SYMPTOMS: dict[TaskName, tuple[str, ...]] = {
     ),
     TaskName.ROUTE_PARTITION: (
         "Gateway requests intermittently fail despite local process health.",
+        "Signals point to a connectivity path issue rather than a full service outage.",
+    ),
+    TaskName.REGISTRY_CORRUPTION: (
+        "Gateway requests fail even though the gateway process is still healthy.",
+        "Logs and config inspection suggest a bad upstream registry entry.",
+    ),
+    TaskName.JOB_GENERATOR_RUNAWAY: (
+        "Queue backlog grows while the worker stays alive.",
+        "Producer pressure appears higher than the system can sustainably drain.",
     ),
 }
 
@@ -90,6 +114,17 @@ def _single_line(text: str) -> str:
     return " ".join(text.replace("\t", " ").splitlines()).strip()
 
 
+def _command_from_dict(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    command_value = payload.get("command")
+    command = command_value.strip() if isinstance(command_value, str) else ""
+    if not command:
+        return None, None
+
+    reasoning_value = payload.get("reasoning")
+    reasoning = reasoning_value.strip() if isinstance(reasoning_value, str) else ""
+    return command, (reasoning or None)
+
+
 def _parse_action_payload(text: str) -> tuple[str | None, str | None]:
     try:
         payload = json.loads(text)
@@ -99,14 +134,43 @@ def _parse_action_payload(text: str) -> tuple[str | None, str | None]:
     if not isinstance(payload, dict):
         return None, None
 
-    command_value = payload.get("command")
-    command = command_value.strip() if isinstance(command_value, str) else ""
-    if not command:
-        return None, None
+    return _command_from_dict(payload)
 
-    reasoning_value = payload.get("reasoning")
-    reasoning = reasoning_value.strip() if isinstance(reasoning_value, str) else ""
-    return command, (reasoning or None)
+
+def _iter_decoded_json_objects(text: str) -> Iterator[Any]:
+    i = 0
+    while i < len(text):
+        if text[i] != "{":
+            i += 1
+            continue
+        try:
+            obj, end = _JSON_DECODER.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        yield obj
+        i = end
+
+
+def _assistant_message_text(message: Any) -> str:
+    content = getattr(message, "content", None)
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                text_val = part.get("text")
+                if text_val is not None:
+                    parts.append(str(text_val))
+            else:
+                text_attr = getattr(part, "text", None)
+                if text_attr is not None:
+                    parts.append(str(text_attr))
+        return "\n".join(parts)
+    return str(content)
 
 
 def extract_action_payload(llm_response: str) -> tuple[str | None, str | None]:
@@ -122,6 +186,12 @@ def extract_action_payload(llm_response: str) -> tuple[str | None, str | None]:
     direct_command, direct_reasoning = _parse_action_payload(response)
     if direct_command:
         return direct_command, direct_reasoning
+
+    for obj in _iter_decoded_json_objects(response):
+        if isinstance(obj, dict):
+            embedded_command, embedded_reasoning = _command_from_dict(obj)
+            if embedded_command:
+                return embedded_command, embedded_reasoning
 
     for match in re.finditer(r"\{[^{}]*\}", response, flags=re.DOTALL):
         embedded_command, embedded_reasoning = _parse_action_payload(match.group(0))
@@ -157,6 +227,7 @@ def _format_step_action(command: str, reasoning: str | None) -> str:
     if not sanitized_reasoning:
         return action
     return f"{action} | reasoning={sanitized_reasoning}"
+
 
 def _task_symptom_block(task_name: TaskName) -> str:
     return "\n".join(f"- {symptom}" for symptom in TASK_SYMPTOMS[task_name])
@@ -206,11 +277,13 @@ def build_prompt(
         "LATEST COMMAND OUTPUT:\n"
         f"{obs.command_output[:2000]}\n\n"
         "Solve this over multiple steps as needed. For this step, return only the single next bash command.\n"
-        "Respond with compact JSON where command is required: {\"command\":\"<bash command>\",\"reasoning\":\"optional concise reason\"}."
+        'Respond with compact JSON where command is required: {"command":"<bash command>","reasoning":"optional concise reason"}.'
     )
 
 
-def _run_episode(client: Any, env: DistributedDebugEnvClient, task_name: TaskName) -> None:
+def _run_episode(
+    client: Any, env: DistributedDebugEnvClient, task_name: TaskName
+) -> None:
     messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     rewards: list[float] = []
 
@@ -219,7 +292,9 @@ def _run_episode(client: Any, env: DistributedDebugEnvClient, task_name: TaskNam
     last_error: str | None = None
     attempt_history: list[dict[str, Any]] = []
 
-    print(f"[START] task={task_name.value} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+    print(
+        f"[START] task={task_name.value} env={BENCHMARK} model={MODEL_NAME}", flush=True
+    )
 
     task_budget = TASK_MAX_STEPS[task_name]
     max_steps = min(task_budget, MAX_STEPS_CAP) if MAX_STEPS_CAP > 0 else task_budget
@@ -234,10 +309,10 @@ def _run_episode(client: Any, env: DistributedDebugEnvClient, task_name: TaskNam
                 model=MODEL_NAME,
                 messages=messages,
                 temperature=TEMPERATURE,
-                max_tokens=128,
+                **_chat_token_limit_kwargs(),
             )
 
-            raw_response = completion.choices[0].message.content or ""
+            raw_response = _assistant_message_text(completion.choices[0].message)
             command, reasoning = extract_action_payload(raw_response)
             if not command:
                 messages.append({"role": "assistant", "content": raw_response})
@@ -287,6 +362,10 @@ def _run_episode(client: Any, env: DistributedDebugEnvClient, task_name: TaskNam
 
     except Exception as exc:
         last_error = str(exc)
+        print(
+            f"[ERROR] task={task_name.value} {type(exc).__name__}: {exc}",
+            flush=True,
+        )
     finally:
         success = bool(done and rewards and rewards[-1] >= 0.95)
         rewards_csv = ",".join(f"{reward:.2f}" for reward in rewards)

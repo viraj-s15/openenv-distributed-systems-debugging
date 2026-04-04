@@ -19,21 +19,53 @@ def inject_cascading_timeout(pm: ProcessManager) -> None:
 
 
 def inject_byzantine_queue_fault(pm: ProcessManager) -> None:
-    subprocess.run(["redis-cli", "LPUSH", "job_queue", '{"id":"poison-001","payload":{{BROKEN'], check=True)
+    subprocess.run(
+        ["redis-cli", "LPUSH", "job_queue", '{"id":"poison-001","payload":{{BROKEN'],
+        check=True,
+    )
 
 
 def inject_distributed_lock_starvation(pm: ProcessManager) -> None:
-    subprocess.run(["redis-cli", "SET", "LOCK:job_processor", "dead-worker-pid-9999"], check=True)
+    subprocess.run(
+        ["redis-cli", "SET", "LOCK:job_processor", "dead-worker-pid-9999"], check=True
+    )
 
 
 def inject_backpressure_cascade(pm: ProcessManager) -> None:
-    _write_json(pm.mesh_root / "worker" / "config.json", {"db_pool_size": 1, "db_write_delay_ms": 800})
+    _write_json(
+        pm.mesh_root / "worker" / "config.json",
+        {"db_pool_size": 1, "db_write_delay_ms": 800},
+    )
     pm.sighup("worker")
 
 
 def inject_route_partition(pm: ProcessManager) -> None:
-    _write_json(pm.mesh_root / "gateway" / "blocked_routes.json", {"blocked": ["gateway->redis"]})
+    _write_json(
+        pm.mesh_root / "gateway" / "blocked_routes.json",
+        {"blocked": ["gateway->redis"]},
+    )
     pm.sighup("gateway")
+
+
+def inject_registry_corruption(pm: ProcessManager) -> None:
+    _write_json(
+        pm.mesh_root / "registry.json",
+        {
+            "services": {
+                "auth": {"host": "invalid-auth-host", "port": 3001, "protocol": "http"},
+                "redis": {"host": "localhost", "port": 6379, "protocol": "tcp"},
+                "worker": {"host": "localhost", "port": None, "protocol": "internal"},
+            }
+        },
+    )
+    pm.sighup("gateway")
+
+
+def inject_job_generator_runaway(pm: ProcessManager) -> None:
+    _write_json(
+        pm.mesh_root / "worker" / "job_generator_config.json", {"interval_ms": 10}
+    )
+    pm.sighup("job_generator")
 
 
 def inject_fault(task_name: TaskName | str, pm: ProcessManager) -> None:
@@ -53,5 +85,11 @@ def inject_fault(task_name: TaskName | str, pm: ProcessManager) -> None:
         return
     if task is TaskName.ROUTE_PARTITION:
         inject_route_partition(pm)
+        return
+    if task is TaskName.REGISTRY_CORRUPTION:
+        inject_registry_corruption(pm)
+        return
+    if task is TaskName.JOB_GENERATOR_RUNAWAY:
+        inject_job_generator_runaway(pm)
         return
     raise ValueError(f"Unknown task: {task_name}")

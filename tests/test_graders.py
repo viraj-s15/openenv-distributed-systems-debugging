@@ -2,6 +2,8 @@ from server.graders import (
     grade_backpressure_cascade,
     grade_byzantine_queue_fault,
     grade_cascading_timeout,
+    grade_job_generator_runaway,
+    grade_registry_corruption,
     grade_distributed_lock_starvation,
     grade_route_partition,
 )
@@ -26,15 +28,25 @@ def _metrics(
 
 
 def test_grade_cascading_timeout_boundaries() -> None:
-    assert grade_cascading_timeout(
-        _metrics(success_rate=1.0), {"cascading_timeout_resolved": True}
-    ) == 1.0
-    assert grade_cascading_timeout(
-        _metrics(success_rate=1.0), {"cascading_timeout_resolved": False}
-    ) == 0.25
-    assert grade_cascading_timeout(
-        _metrics(success_rate=0.5), {"cascading_timeout_resolved": False}
-    ) == 0.125
+    assert (
+        grade_cascading_timeout(
+            _metrics(success_rate=1.0), {"cascading_timeout_resolved": True}
+        )
+        == 1.0
+    )
+    assert (
+        grade_cascading_timeout(
+            _metrics(success_rate=1.0), {"cascading_timeout_resolved": False}
+        )
+        == 0.25
+    )
+    assert (
+        grade_cascading_timeout(
+            _metrics(success_rate=0.5), {"cascading_timeout_resolved": False}
+        )
+        == 0.125
+    )
+
 
 def test_grade_byzantine_queue_fault_cases() -> None:
     ctx = {"baseline_worker_restart_count": 3}
@@ -47,9 +59,18 @@ def test_grade_distributed_lock_starvation_cases() -> None:
     ctx_locked = {"baseline_consumer_stall_count": 0, "lock_exists": True}
     ctx_unlocked = {"baseline_consumer_stall_count": 0, "lock_exists": False}
 
-    assert grade_distributed_lock_starvation(_metrics(depth=2, stalls=0), ctx_unlocked) == 1.0
-    assert grade_distributed_lock_starvation(_metrics(depth=10, stalls=0), ctx_unlocked) == 0.6
-    assert grade_distributed_lock_starvation(_metrics(depth=10, stalls=3), ctx_locked) == 0.0
+    assert (
+        grade_distributed_lock_starvation(_metrics(depth=2, stalls=0), ctx_unlocked)
+        == 1.0
+    )
+    assert (
+        grade_distributed_lock_starvation(_metrics(depth=10, stalls=0), ctx_unlocked)
+        == 0.6
+    )
+    assert (
+        grade_distributed_lock_starvation(_metrics(depth=10, stalls=3), ctx_locked)
+        == 0.0
+    )
 
 
 def test_grade_backpressure_cascade_continuous() -> None:
@@ -59,5 +80,53 @@ def test_grade_backpressure_cascade_continuous() -> None:
 
 
 def test_grade_route_partition_threshold() -> None:
-    assert grade_route_partition(_metrics(success_rate=0.96), {"route_blocked": False}) == 1.0
-    assert grade_route_partition(_metrics(success_rate=0.8), {"route_blocked": True}) == 0.0
+    assert (
+        grade_route_partition(_metrics(success_rate=0.96), {"route_blocked": False})
+        == 1.0
+    )
+    assert (
+        grade_route_partition(_metrics(success_rate=0.8), {"route_blocked": True})
+        == 0.0
+    )
+
+
+def test_grade_registry_corruption_thresholds() -> None:
+    assert (
+        grade_registry_corruption(
+            _metrics(success_rate=0.99), {"registry_auth_matches_default": True}
+        )
+        == 1.0
+    )
+    assert (
+        grade_registry_corruption(
+            _metrics(success_rate=0.8), {"registry_auth_matches_default": True}
+        )
+        == 0.9
+    )
+    assert (
+        grade_registry_corruption(
+            _metrics(success_rate=1.0), {"registry_auth_matches_default": False}
+        )
+        == 0.3
+    )
+
+
+def test_grade_job_generator_runaway_thresholds() -> None:
+    assert (
+        grade_job_generator_runaway(
+            _metrics(depth=4), {"job_generator_rate_resolved": True}
+        )
+        == 1.0
+    )
+    assert (
+        grade_job_generator_runaway(
+            _metrics(depth=20), {"job_generator_rate_resolved": True}
+        )
+        == 0.7
+    )
+    assert (
+        grade_job_generator_runaway(
+            _metrics(depth=20), {"job_generator_rate_resolved": False}
+        )
+        == 0.2
+    )

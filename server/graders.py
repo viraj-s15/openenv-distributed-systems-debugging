@@ -18,7 +18,9 @@ def grade_cascading_timeout(metrics: SystemMetrics, context: dict[str, Any]) -> 
     return _clamp(0.4 + metrics.gateway_success_rate * 0.4)
 
 
-def grade_byzantine_queue_fault(metrics: SystemMetrics, context: dict[str, Any]) -> float:
+def grade_byzantine_queue_fault(
+    metrics: SystemMetrics, context: dict[str, Any]
+) -> float:
     baseline_restart = int(context.get("baseline_worker_restart_count", 0))
     restart_delta = max(0, metrics.worker_restart_count - baseline_restart)
 
@@ -32,7 +34,9 @@ def grade_byzantine_queue_fault(metrics: SystemMetrics, context: dict[str, Any])
     return _clamp(queue_component - stability_penalty)
 
 
-def grade_distributed_lock_starvation(metrics: SystemMetrics, context: dict[str, Any]) -> float:
+def grade_distributed_lock_starvation(
+    metrics: SystemMetrics, context: dict[str, Any]
+) -> float:
     lock_exists = bool(context.get("lock_exists", True))
     baseline_stall = int(context.get("baseline_consumer_stall_count", 0))
     stall_delta = max(0, metrics.consumer_stall_count - baseline_stall)
@@ -59,9 +63,33 @@ def grade_route_partition(metrics: SystemMetrics, context: dict[str, Any]) -> fl
     return 0.0
 
 
+def grade_registry_corruption(metrics: SystemMetrics, context: dict[str, Any]) -> float:
+    registry_auth_matches_default = bool(
+        context.get("registry_auth_matches_default", False)
+    )
+    if registry_auth_matches_default and metrics.gateway_success_rate >= 0.99:
+        return 1.0
+    if registry_auth_matches_default:
+        return _clamp(0.5 + metrics.gateway_success_rate * 0.5)
+    return _clamp(metrics.gateway_success_rate * 0.3)
+
+
+def grade_job_generator_runaway(
+    metrics: SystemMetrics, context: dict[str, Any]
+) -> float:
+    rate_resolved = bool(context.get("job_generator_rate_resolved", False))
+    if rate_resolved and metrics.queue_depth <= 5:
+        return 1.0
+    if rate_resolved and metrics.queue_depth <= 30:
+        return 0.7
+    if rate_resolved:
+        return _clamp(0.7 - (metrics.queue_depth - 30) / 100.0)
+    return 0.2 if metrics.queue_depth <= 30 else 0.0
+
+
 def grade_task(
     task_name: TaskName | str, metrics: SystemMetrics, context: dict[str, Any]
- ) -> float:
+) -> float:
     task = TaskName.parse(task_name) if isinstance(task_name, str) else task_name
 
     if task is TaskName.CASCADING_TIMEOUT:
@@ -74,4 +102,8 @@ def grade_task(
         return grade_backpressure_cascade(metrics, context)
     if task is TaskName.ROUTE_PARTITION:
         return grade_route_partition(metrics, context)
+    if task is TaskName.REGISTRY_CORRUPTION:
+        return grade_registry_corruption(metrics, context)
+    if task is TaskName.JOB_GENERATOR_RUNAWAY:
+        return grade_job_generator_runaway(metrics, context)
     return 0.0

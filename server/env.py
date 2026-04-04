@@ -10,7 +10,7 @@ from .constants import (
     NO_COMMAND_PROVIDED_SENTINEL,
     TASK_MAX_STEPS,
     TaskName,
- )
+)
 from .fault_injector import inject_fault
 from .graders import grade_task
 from .metrics_poller import MetricsPoller
@@ -24,7 +24,9 @@ class DistributedDebugEnv:
     def __init__(
         self, project_root: Path | None = None, mesh_root: Path | None = None
     ) -> None:
-        self.project_root = (project_root or Path(__file__).resolve().parent.parent).resolve()
+        self.project_root = (
+            project_root or Path(__file__).resolve().parent.parent
+        ).resolve()
         self.mesh_root = (
             mesh_root or Path(os.getenv("MESH_ROOT", self.project_root / "mesh"))
         ).resolve()
@@ -86,6 +88,10 @@ class DistributedDebugEnv:
         self._write_json(
             self.mesh_root / "worker" / "config.json", DEFAULT_CONFIGS["worker"]
         )
+        self._write_json(
+            self.mesh_root / "worker" / "job_generator_config.json",
+            DEFAULT_CONFIGS["job_generator"],
+        )
 
     def _truncate_logs(self) -> None:
         for service in ["gateway", "auth", "worker", "job_gen"]:
@@ -130,7 +136,9 @@ class DistributedDebugEnv:
         gateway_config_file = self.mesh_root / "gateway" / "config.json"
         try:
             auth_payload = json.loads(auth_config_file.read_text(encoding="utf-8"))
-            gateway_payload = json.loads(gateway_config_file.read_text(encoding="utf-8"))
+            gateway_payload = json.loads(
+                gateway_config_file.read_text(encoding="utf-8")
+            )
         except Exception:
             return False
 
@@ -142,6 +150,36 @@ class DistributedDebugEnv:
             return False
         return auth_delay_ms <= auth_timeout_ms
 
+    def _is_registry_auth_default(self) -> bool:
+        registry_file = self.mesh_root / "registry.json"
+        try:
+            payload = json.loads(registry_file.read_text(encoding="utf-8"))
+            auth_service = payload["services"]["auth"]
+        except Exception:
+            return False
+
+        return (
+            auth_service.get("host") == "localhost"
+            and int(auth_service.get("port", 0)) == 3001
+            and auth_service.get("protocol") == "http"
+        )
+
+    def _job_generator_interval_ms(self) -> int:
+        config_file = self.mesh_root / "worker" / "job_generator_config.json"
+        try:
+            payload = json.loads(config_file.read_text(encoding="utf-8"))
+        except Exception:
+            return 0
+
+        try:
+            return int(payload.get("interval_ms", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _is_job_generator_rate_resolved(self) -> bool:
+        return self._job_generator_interval_ms() >= int(
+            DEFAULT_CONFIGS["job_generator"]["interval_ms"]
+        )
 
     def _build_grader_context(self) -> dict[str, Any]:
         return {
@@ -149,6 +187,9 @@ class DistributedDebugEnv:
             "route_blocked": self._is_route_blocked(),
             "lock_exists": self._is_lock_present(),
             "cascading_timeout_resolved": self._is_cascading_timeout_resolved(),
+            "registry_auth_matches_default": self._is_registry_auth_default(),
+            "job_generator_interval_ms": self._job_generator_interval_ms(),
+            "job_generator_rate_resolved": self._is_job_generator_rate_resolved(),
         }
 
     def _blocked_command(self, command: str) -> bool:
@@ -238,7 +279,6 @@ class DistributedDebugEnv:
         ]
         return any(pattern in normalized for pattern in state_change_patterns)
 
-
     def _compute_reward(
         self,
         command: str,
@@ -259,7 +299,10 @@ class DistributedDebugEnv:
         signature_count = self._command_counts.get(signature, 0) + 1
         self._command_counts[signature] = signature_count
 
-        if self._is_diagnostic_command(command) and signature not in self._seen_diagnostic_signatures:
+        if (
+            self._is_diagnostic_command(command)
+            and signature not in self._seen_diagnostic_signatures
+        ):
             reward += 0.02
             self._seen_diagnostic_signatures.add(signature)
 
@@ -271,7 +314,10 @@ class DistributedDebugEnv:
         else:
             reward -= 0.05
 
-        if current.metrics.gateway_success_rate > previous.metrics.gateway_success_rate + 1e-3:
+        if (
+            current.metrics.gateway_success_rate
+            > previous.metrics.gateway_success_rate + 1e-3
+        ):
             reward += 0.05
 
         if current.metrics.queue_depth < previous.metrics.queue_depth:
@@ -296,7 +342,10 @@ class DistributedDebugEnv:
         }:
             reward -= 0.08
 
-        if self.last_exit_code != 0 and command_error not in {"blocked_command", "no_command_provided"}:
+        if self.last_exit_code != 0 and command_error not in {
+            "blocked_command",
+            "no_command_provided",
+        }:
             reward -= 0.08
 
         if command_error == "blocked_command":

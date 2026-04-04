@@ -7,6 +7,8 @@ class TaskName(str, Enum):
     DISTRIBUTED_LOCK_STARVATION = "distributed-lock-starvation"
     BACKPRESSURE_CASCADE = "backpressure-cascade"
     ROUTE_PARTITION = "route-partition"
+    REGISTRY_CORRUPTION = "registry-corruption"
+    JOB_GENERATOR_RUNAWAY = "job-generator-runaway"
 
     @classmethod
     def parse(cls, value: str) -> "TaskName":
@@ -39,11 +41,14 @@ TASK_MAX_STEPS = {
     TaskName.DISTRIBUTED_LOCK_STARVATION: 20,
     TaskName.BACKPRESSURE_CASCADE: 20,
     TaskName.ROUTE_PARTITION: 20,
+    TaskName.REGISTRY_CORRUPTION: 18,
+    TaskName.JOB_GENERATOR_RUNAWAY: 20,
 }
 
 DEFAULT_CONFIGS = {
     "auth": {"delay_ms": 200},
     "gateway": {"auth_timeout_ms": 500},
     "worker": {"db_pool_size": 10, "db_write_delay_ms": 0},
+    "job_generator": {"interval_ms": 333},
     "blocked_routes": {"blocked": []},
 }

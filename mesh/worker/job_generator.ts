@@ -1,11 +1,30 @@
 import Redis from "ioredis";
 
+type JobGeneratorConfig = {
+  interval_ms: number;
+};
+
 const redis = new Redis({ host: "localhost", port: 6379, maxRetriesPerRequest: 1 });
-const INTERVAL_MS = Number(process.env.JOB_GEN_INTERVAL_MS || "333");
+const MESH_ROOT = process.env.MESH_ROOT || "/mesh";
+const CONFIG_PATH = `${MESH_ROOT}/worker/job_generator_config.json`;
 
 let running = true;
+let intervalMs = 333;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const readJson = async <T>(path: string, fallback: T): Promise<T> => {
+  try {
+    return (await Bun.file(path).json()) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+const loadConfig = async () => {
+  const config = await readJson<JobGeneratorConfig>(CONFIG_PATH, { interval_ms: 333 });
+  intervalMs = Math.max(10, Number(config.interval_ms) || 333);
+};
 
 const loop = async () => {
   while (running) {
@@ -39,9 +58,24 @@ const loop = async () => {
       );
     }
 
-    await sleep(INTERVAL_MS);
+    await sleep(intervalMs);
   }
 };
+
+await loadConfig();
+
+process.on("SIGHUP", async () => {
+  await loadConfig();
+  console.log(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "INFO",
+      service: "job_generator",
+      event: "config_reloaded",
+      interval_ms: intervalMs,
+    }),
+  );
+});
 
 process.on("SIGTERM", () => {
   running = false;

@@ -65,6 +65,8 @@ Examples:
 | `distributed-lock-starvation` | hard | clear stale lock and resume consumption |
 | `backpressure-cascade` | hard | recover throughput and reduce queue growth |
 | `route-partition` | hard | unblock gateway->redis route policy |
+| `registry-corruption` | medium | repair corrupted auth registry entry and restore request flow |
+| `job-generator-runaway` | hard | reduce enqueue pressure so the queue drains sustainably |
 
 ## Reward Function
 - Terminal reward: `1.0` when grader score >= `0.95`
@@ -72,8 +74,8 @@ Examples:
 - Penalties for blocked/damaging actions and repeated non-productive behavior
 - Reward clamped to `[0.0, 1.0]`
 
-## Baseline Inference policy (3 of 5 by default)
-All five tasks are implemented in the environment.
+## Baseline Inference policy (3 of 7 by default)
+All seven tasks are implemented in the environment.
 
 `inference.py` runs these default tasks for runtime reliability:
 

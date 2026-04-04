@@ -39,6 +39,16 @@ tasks:
     difficulty: hard
     max_steps: 20
 
+  - name: registry-corruption
+    description: Gateway reloads a corrupted auth registry entry and fails requests.
+    difficulty: medium
+    max_steps: 18
+
+  - name: job-generator-runaway
+    description: Runaway enqueue rate overwhelms worker throughput and grows backlog.
+    difficulty: hard
+    max_steps: 20
+
 observation_space:
   type: object
   properties:
