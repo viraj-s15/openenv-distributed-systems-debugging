@@ -229,6 +229,22 @@ def _format_step_action(command: str, reasoning: str | None) -> str:
     return f"{action} | reasoning={sanitized_reasoning}"
 
 
+def _episode_score(rewards: list[float]) -> float:
+    # Score is terminal task progress signal and must stay normalized for evaluator checks.
+    if not rewards:
+        return 0.0
+    return max(0.0, min(1.0, float(rewards[-1])))
+
+
+def _format_end_line(
+    *, success: bool, steps: int, score: float, rewards: list[float]
+ ) -> str:
+    rewards_csv = ",".join(f"{reward:.2f}" for reward in rewards)
+    return (
+        f"[END]   success={_bool(success)} steps={steps} "
+        f"score={score:.2f} rewards={rewards_csv}"
+    )
+
 def _task_symptom_block(task_name: TaskName) -> str:
     return "\n".join(f"- {symptom}" for symptom in TASK_SYMPTOMS[task_name])
 
@@ -367,10 +383,10 @@ def _run_episode(
             flush=True,
         )
     finally:
-        success = bool(done and rewards and rewards[-1] >= 0.95)
-        rewards_csv = ",".join(f"{reward:.2f}" for reward in rewards)
+        score = _episode_score(rewards)
+        success = bool(done and score >= 0.95)
         print(
-            f"[END]   success={_bool(success)} steps={step} rewards={rewards_csv}",
+            _format_end_line(success=success, steps=step, score=score, rewards=rewards),
             flush=True,
         )
 

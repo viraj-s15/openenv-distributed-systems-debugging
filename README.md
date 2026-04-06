@@ -14,7 +14,7 @@ The environment simulates a production-style pipeline:
 An agent interacts only through shell commands and must diagnose/fix injected faults.
 
 ## Why this environment
-Most RL environments focus on games or synthetic workflows. This one targets operational debugging skills used in real systems engineering:
+Most RL environments focus on games or synthetic workflows. This one targets some bugs that I have faced personally at my job focussing on debugging skills used in real systems engineering:
 
 - reading logs under uncertainty
 - triaging latency and queue symptoms
@@ -124,7 +124,7 @@ curl -X POST http://localhost:8000/step \
 ```text
 [START] task=<task_name> env=<benchmark> model=<model_name>
 [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-[END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+[END]   success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...,rn>
 ```
 
 ## Logging
@@ -207,7 +207,7 @@ if not lines:
 
 start_re = re.compile(r'^\[START\] task=\S+ env=\S+ model=.+$')
 step_re = re.compile(r'^\[STEP\]\s{2}step=\d+ action=.* reward=\d+\.\d{2} done=(true|false) error=.*$')
-end_re = re.compile(r'^\[END\]\s{3}success=(true|false) steps=\d+ rewards=.*$')
+end_re = re.compile(r'^\[END\]\s{3}success=(true|false) steps=\d+ score=\d+\.\d{2} rewards=.*$')
 
 for i, line in enumerate(lines, 1):
     if line.startswith("[START]") and not start_re.match(line):

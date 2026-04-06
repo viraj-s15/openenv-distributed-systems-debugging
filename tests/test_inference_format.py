@@ -3,6 +3,8 @@ import os
 from server.constants import TaskName
 from inference import (
     _attempt_history_block,
+    _episode_score,
+    _format_end_line,
     _parse_tasks,
     _single_line,
     _task_symptom_block,
@@ -167,3 +169,18 @@ def test_parse_tasks_default_and_override() -> None:
             os.environ.pop("TASKS_CSV", None)
         else:
             os.environ["TASKS_CSV"] = previous
+
+
+
+def test_episode_score_clamps_terminal_reward_to_unit_interval() -> None:
+    assert _episode_score([]) == 0.0
+    assert _episode_score([0.2, 0.8]) == 0.8
+    assert _episode_score([1.2]) == 1.0
+    assert _episode_score([-0.1]) == 0.0
+
+
+def test_end_log_line_includes_score_and_reward_list() -> None:
+    line = _format_end_line(success=True, steps=3, score=0.987, rewards=[0.0, 0.125, 1.0])
+    assert line == (
+        "[END]   success=true steps=3 score=0.99 rewards=0.00,0.12,1.00"
+    )
