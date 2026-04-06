@@ -1,3 +1,13 @@
+---
+title: distributed-systems-debug-env
+sdk: docker
+app_port: 8000
+colorFrom: blue
+colorTo: indigo
+short_description: OpenEnv RL env for debugging distributed systems failures.
+---
+
+
 # Distributed Systems Debug Environment
 
 ## Overview
