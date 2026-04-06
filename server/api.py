@@ -24,9 +24,12 @@ app = FastAPI(title="Distributed Systems Debug Environment", version="1.0.0", li
 
 
 @app.post("/reset", response_model=Observation)
-async def reset(task_name: str) -> Observation:
+async def reset(task_name: str | None = None) -> Observation:
+    # Validator and sample inference call /reset without task input.
+    # Use a deterministic default task for reproducible episode bootstrapping.
+    selected_task_name = task_name or TaskName.CASCADING_TIMEOUT.value
     try:
-        task = TaskName.parse(task_name)
+        task = TaskName.parse(selected_task_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

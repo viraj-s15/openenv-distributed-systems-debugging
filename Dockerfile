@@ -29,6 +29,7 @@ COPY --chown=user:user requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=user:user *.py ./
+COPY --chown=user:user server/ ./server/
 COPY --chown=user:user openenv.yaml ./
 COPY --chown=user:user start.sh ./
 RUN chmod +x ./start.sh
