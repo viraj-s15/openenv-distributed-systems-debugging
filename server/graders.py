@@ -5,13 +5,14 @@ from .models import SystemMetrics
 
 
 def _clamp(score: float) -> float:
-    return max(0.0, min(1.0, score))
+    """Clamp score to the open interval (0, 1), as required by the evaluation pipeline."""
+    return max(0.01, min(0.99, score))
 
 
 def grade_cascading_timeout(metrics: SystemMetrics, context: dict[str, Any]) -> float:
     timeout_resolved = bool(context.get("cascading_timeout_resolved", False))
     if timeout_resolved and metrics.gateway_success_rate >= 0.99:
-        return 1.0
+        return _clamp(1.0)
     if not timeout_resolved:
         # Prevent instant pass while the injected timeout fault is still active.
         return _clamp(metrics.gateway_success_rate * 0.25)
@@ -25,9 +26,9 @@ def grade_byzantine_queue_fault(
     restart_delta = max(0, metrics.worker_restart_count - baseline_restart)
 
     if metrics.queue_depth == 0 and restart_delta <= 1:
-        return 1.0
+        return _clamp(1.0)
     if metrics.queue_depth == 0:
-        return 0.6
+        return _clamp(0.6)
 
     queue_component = max(0.0, 1.0 - metrics.queue_depth / 50.0)
     stability_penalty = min(0.4, restart_delta * 0.05)
@@ -42,12 +43,12 @@ def grade_distributed_lock_starvation(
     stall_delta = max(0, metrics.consumer_stall_count - baseline_stall)
 
     if not lock_exists and metrics.queue_depth <= 3:
-        return 1.0
+        return _clamp(1.0)
     if not lock_exists:
-        return 0.6
+        return _clamp(0.6)
 
     # If lock still exists, reward slight progress only when stalls don't explode.
-    return 0.2 if stall_delta <= 1 else 0.0
+    return _clamp(0.2) if stall_delta <= 1 else _clamp(0.0)
 
 
 def grade_backpressure_cascade(metrics: SystemMetrics, _: dict[str, Any]) -> float:
@@ -57,10 +58,10 @@ def grade_backpressure_cascade(metrics: SystemMetrics, _: dict[str, Any]) -> flo
 def grade_route_partition(metrics: SystemMetrics, context: dict[str, Any]) -> float:
     route_blocked = bool(context.get("route_blocked", True))
     if not route_blocked and metrics.gateway_success_rate >= 0.95:
-        return 1.0
+        return _clamp(1.0)
     if not route_blocked:
         return _clamp(metrics.gateway_success_rate)
-    return 0.0
+    return _clamp(0.0)
 
 
 def grade_registry_corruption(metrics: SystemMetrics, context: dict[str, Any]) -> float:
@@ -68,7 +69,7 @@ def grade_registry_corruption(metrics: SystemMetrics, context: dict[str, Any]) -
         context.get("registry_auth_matches_default", False)
     )
     if registry_auth_matches_default and metrics.gateway_success_rate >= 0.99:
-        return 1.0
+        return _clamp(1.0)
     if registry_auth_matches_default:
         return _clamp(0.5 + metrics.gateway_success_rate * 0.5)
     return _clamp(metrics.gateway_success_rate * 0.3)
@@ -79,12 +80,12 @@ def grade_job_generator_runaway(
 ) -> float:
     rate_resolved = bool(context.get("job_generator_rate_resolved", False))
     if rate_resolved and metrics.queue_depth <= 5:
-        return 1.0
+        return _clamp(1.0)
     if rate_resolved and metrics.queue_depth <= 30:
-        return 0.7
+        return _clamp(0.7)
     if rate_resolved:
         return _clamp(0.7 - (metrics.queue_depth - 30) / 100.0)
-    return 0.2 if metrics.queue_depth <= 30 else 0.0
+    return _clamp(0.2) if metrics.queue_depth <= 30 else _clamp(0.0)
 
 
 def grade_task(
@@ -106,4 +107,4 @@ def grade_task(
         return grade_registry_corruption(metrics, context)
     if task is TaskName.JOB_GENERATOR_RUNAWAY:
         return grade_job_generator_runaway(metrics, context)
-    return 0.0
+    return _clamp(0.0)

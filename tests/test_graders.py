@@ -32,7 +32,7 @@ def test_grade_cascading_timeout_boundaries() -> None:
         grade_cascading_timeout(
             _metrics(success_rate=1.0), {"cascading_timeout_resolved": True}
         )
-        == 1.0
+        == 0.99
     )
     assert (
         grade_cascading_timeout(
@@ -50,9 +50,9 @@ def test_grade_cascading_timeout_boundaries() -> None:
 
 def test_grade_byzantine_queue_fault_cases() -> None:
     ctx = {"baseline_worker_restart_count": 3}
-    assert grade_byzantine_queue_fault(_metrics(depth=0, restarts=3), ctx) == 1.0
+    assert grade_byzantine_queue_fault(_metrics(depth=0, restarts=3), ctx) == 0.99
     assert grade_byzantine_queue_fault(_metrics(depth=0, restarts=8), ctx) == 0.6
-    assert grade_byzantine_queue_fault(_metrics(depth=40, restarts=10), ctx) == 0.0
+    assert grade_byzantine_queue_fault(_metrics(depth=40, restarts=10), ctx) == 0.01
 
 
 def test_grade_distributed_lock_starvation_cases() -> None:
@@ -61,7 +61,7 @@ def test_grade_distributed_lock_starvation_cases() -> None:
 
     assert (
         grade_distributed_lock_starvation(_metrics(depth=2, stalls=0), ctx_unlocked)
-        == 1.0
+        == 0.99
     )
     assert (
         grade_distributed_lock_starvation(_metrics(depth=10, stalls=0), ctx_unlocked)
@@ -69,24 +69,24 @@ def test_grade_distributed_lock_starvation_cases() -> None:
     )
     assert (
         grade_distributed_lock_starvation(_metrics(depth=10, stalls=3), ctx_locked)
-        == 0.0
+        == 0.01
     )
 
 
 def test_grade_backpressure_cascade_continuous() -> None:
-    assert grade_backpressure_cascade(_metrics(depth=0), {}) == 1.0
+    assert grade_backpressure_cascade(_metrics(depth=0), {}) == 0.99
     assert grade_backpressure_cascade(_metrics(depth=100), {}) == 0.5
-    assert grade_backpressure_cascade(_metrics(depth=200), {}) == 0.0
+    assert grade_backpressure_cascade(_metrics(depth=200), {}) == 0.01
 
 
 def test_grade_route_partition_threshold() -> None:
     assert (
         grade_route_partition(_metrics(success_rate=0.96), {"route_blocked": False})
-        == 1.0
+        == 0.99
     )
     assert (
         grade_route_partition(_metrics(success_rate=0.8), {"route_blocked": True})
-        == 0.0
+        == 0.01
     )
 
 
@@ -95,7 +95,7 @@ def test_grade_registry_corruption_thresholds() -> None:
         grade_registry_corruption(
             _metrics(success_rate=0.99), {"registry_auth_matches_default": True}
         )
-        == 1.0
+        == 0.99
     )
     assert (
         grade_registry_corruption(
@@ -116,7 +116,7 @@ def test_grade_job_generator_runaway_thresholds() -> None:
         grade_job_generator_runaway(
             _metrics(depth=4), {"job_generator_rate_resolved": True}
         )
-        == 1.0
+        == 0.99
     )
     assert (
         grade_job_generator_runaway(
