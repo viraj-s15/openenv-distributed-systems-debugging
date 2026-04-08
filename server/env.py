@@ -289,10 +289,10 @@ class DistributedDebugEnv:
         command_error: str | None,
     ) -> float:
         if command_error == "no_command_provided":
-            return 0.0
+            return 0.01
 
         if grader_score >= 0.95:
-            return 1.0
+            return 0.99
 
         reward = grader_score * 0.75
         signature = self._command_signature(command)
@@ -351,7 +351,7 @@ class DistributedDebugEnv:
         if command_error == "blocked_command":
             reward -= 0.25
 
-        return max(0.0, min(1.0, reward))
+        return max(0.01, min(0.99, reward))
 
     def _status_block(self, metrics: Any) -> str:
         return (

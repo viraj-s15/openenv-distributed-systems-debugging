@@ -173,10 +173,10 @@ def test_parse_tasks_default_and_override() -> None:
 
 
 def test_episode_score_clamps_terminal_reward_to_unit_interval() -> None:
-    assert _episode_score([]) == 0.0
+    assert _episode_score([]) == 0.01
     assert _episode_score([0.2, 0.8]) == 0.8
-    assert _episode_score([1.2]) == 1.0
-    assert _episode_score([-0.1]) == 0.0
+    assert _episode_score([1.2]) == 0.99
+    assert _episode_score([-0.1]) == 0.01
 
 
 def test_end_log_line_includes_score_and_reward_list() -> None:

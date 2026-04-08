@@ -232,8 +232,8 @@ def _format_step_action(command: str, reasoning: str | None) -> str:
 def _episode_score(rewards: list[float]) -> float:
     # Score is terminal task progress signal and must stay normalized for evaluator checks.
     if not rewards:
-        return 0.0
-    return max(0.0, min(1.0, float(rewards[-1])))
+        return 0.01
+    return max(0.01, min(0.99, float(rewards[-1])))
 
 
 def _format_end_line(
